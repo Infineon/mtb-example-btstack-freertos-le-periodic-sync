@@ -27,12 +27,40 @@
  ******************************************************************************/
 #define HCI_BLE_EVENT_MASK_DEF_NEW "\x00\x00\x00\x00\x7F\xff\xff\xff"
 #define PERIODIC_SYNC_START_TIME_VALUE      2000
+#define MAX_EXT_SCAN_LEN               (300U)
 
 /******************************************************************************
  *                                GLOBAL VARIABLES
  ******************************************************************************/
 static TimerHandle_t periodic_sync_start_timer = NULL;
 wiced_bt_device_address_t peer_bda = {0x20, 0x82, 0x9B, 0x01, 0x22, 0x33};
+
+wiced_ble_ext_scan_params_t scan_params =
+{
+    .own_addr_type = BLE_ADDR_PUBLIC,
+    .scanning_phys = WICED_BLE_EXT_ADV_PHY_1M_BIT,
+    .scan_filter_policy = WICED_BLE_EXT_SCAN_BASIC_UNFILTERED_SP,
+    .sp_1m.scan_type = BTM_BLE_SCAN_MODE_PASSIVE,
+    .sp_1m.scan_interval = WICED_BT_CFG_DEFAULT_HIGH_DUTY_SCAN_INTERVAL,
+    .sp_1m.scan_window = WICED_BT_CFG_DEFAULT_HIGH_DUTY_SCAN_WINDOW
+};
+
+wiced_ble_ext_scan_enable_params_t scan_enable =
+{
+    .scan_duration =0,
+    .scan_period = 0,
+};
+
+wiced_ble_padv_create_sync_params_t sync_par =
+{
+    .options = WICED_BLE_PADV_CREATE_SYNC_OPTION_IGNORE_PA_LIST,
+    .adv_sid = APP_BT_PERIODIC_ADV_SET_ID,
+    .adv_addr_type = BLE_ADDR_PUBLIC,
+    .adv_addr = {0x20, 0x82, 0x9B, 0x01, 0x22, 0x33},
+    .skip= 0,
+    .sync_timeout = APP_BT_PERIODIC_ADV_SYNC_TIMEOUT,
+    .sync_cte_type = 0,
+};
 
 /*******************************************************************************
  *                              FUNCTION DEFINITIONS
@@ -50,11 +78,14 @@ wiced_bt_device_address_t peer_bda = {0x20, 0x82, 0x9B, 0x01, 0x22, 0x33};
  *
  * @return void
  */
-static void periodic_sync_scan_result_cback (wiced_bt_ble_scan_results_t *p_scan_result, uint8_t *p_adv_data)
+
+static void ext_scan_result_cback(wiced_ble_ext_scan_results_t *p_scan_result,
+        uint16_t adv_data_len,
+        uint8_t *p_adv_data)
 {
-    if(p_scan_result != NULL)
+    if (p_scan_result != NULL)
     {
-        printf("[%s]  is_externed: %d, rssi:%i\r\n", __FUNCTION__, p_scan_result->is_extended, p_scan_result->rssi);
+        printf("[%s]  rssi:%i\n", __FUNCTION__, p_scan_result->rssi);
     }
 }
 
@@ -70,61 +101,90 @@ static void periodic_sync_scan_result_cback (wiced_bt_ble_scan_results_t *p_scan
  *
  * @return void
  */
-static void periodic_sync_ext_adv_callback (wiced_bt_ble_adv_ext_event_t event, wiced_bt_ble_adv_ext_event_data_t *p_data)
+static void periodic_sync_ext_adv_callback (wiced_ble_ext_adv_event_t event, wiced_ble_ext_adv_event_data_t *p_data)
 {
     uint8_t data_len = 0;
     printf("[%s]  event: %s\r\n", __FUNCTION__, app_bt_util_get_ext_adv_event_name(event));
 
     switch (event)
     {
-        case WICED_BT_BLE_PERIODIC_ADV_SYNC_ESTABLISHED_EVENT:
+        case WICED_BLE_PERIODIC_ADV_SYNC_ESTABLISHED_EVENT:
             printf("[%s] PERIODIC_ADV_SYNC_ESTABLISHED_EVENT\r\n", __FUNCTION__);
-            wiced_bt_ble_scan (BTM_BLE_SCAN_TYPE_NONE, WICED_FALSE, NULL);
+            wiced_ble_ext_scan_enable(0,&scan_enable);
             break;
 
-        case WICED_BT_BLE_PERIODIC_ADV_REPORT_EVENT:
-            data_len = p_data->periodic_adv_report.data_len;
+        case WICED_BLE_PERIODIC_ADV_REPORT_EVENT:
+            data_len = p_data->periodic_adv_report.data_length;
             if(data_len > 0)
             {
-                printf("[%s] PERIODIC_ADV_REPORT_EVENT, len:%d, rssi:%i, content:%d...\r\n", __FUNCTION__, data_len,
-                            p_data->periodic_adv_report.adv_rssi, p_data->periodic_adv_report.adv_data[0]);
+                printf("[%s] PERIODIC_ADV_REPORT_EVENT, len:%d, rssi:%i,content:%d...\r\n", __FUNCTION__, data_len,
+                            p_data->periodic_adv_report.rssi,p_data->
+                            periodic_adv_report.p_data[0]);
             }
             else
             {
                 printf("[%s] PERIODIC_ADV_REPORT_EVENT, len:%d, rssi:%i\r\n", __FUNCTION__, data_len,
-                            p_data->periodic_adv_report.adv_rssi);
+                            p_data->periodic_adv_report.rssi);
             }
             break;
 
-        case WICED_BT_BLE_PERIODIC_ADV_SYNC_LOST_EVENT:
+        case WICED_BLE_PERIODIC_ADV_SYNC_LOST_EVENT:
             printf("[%s] PERIODIC_ADV_SYNC_LOST_EVENT, re-sync again\r\n", __FUNCTION__);
-            wiced_bt_ble_create_sync_to_periodic_adv (WICED_BT_BLE_SYNC_TO_PERIODIC_ADV_LIST,
-                                                    APP_BT_PERIODIC_ADV_SET_ID, BLE_ADDR_PUBLIC, peer_bda, 0, APP_BT_PERIODIC_ADV_SYNC_TIMEOUT, 0);
-            wiced_bt_ble_scan (BTM_BLE_SCAN_TYPE_HIGH_DUTY, WICED_FALSE, periodic_sync_scan_result_cback);
+            memcpy(sync_par.adv_addr, peer_bda, BD_ADDR_LEN);
+            wiced_ble_padv_create_sync (&sync_par);
+            wiced_ble_ext_scan_enable(1,&scan_enable);
+
             break;
 
-        case WICED_BT_BLE_PAWR_SYNC_ESTABLISHED_EVENT:
-            printf("[%s] PAWR_SYNC_ESTABLISHED_EVENT\r\n", __FUNCTION__);
-            wiced_bt_ble_scan (BTM_BLE_SCAN_TYPE_NONE, WICED_FALSE, NULL);
+        case WICED_BT_BLE_PAWR_SUBEVENT_DATA_REQ_EVENT:
+            printf("[%s] PAWR_SYNC_ESTABLISHED_EVENT\n", __FUNCTION__);
+            wiced_ble_ext_scan_enable(0,&scan_enable);
             break;
 
-        case WICED_BT_BLE_PAWR_IND_REPORT_EVENT:
-            data_len = p_data->pawr_ind_report.data_length;
+        case WICED_BT_BLE_PAWR_RSP_REPORT_EVENT:
+            data_len = p_data->pawr_rsp_report.data_length;
             if(data_len > 0)
             {
-                printf("[%s] PAWR_IND_REPORT_EVENT, len:%d, rssi:%i, content:%d...\r\n", __FUNCTION__, p_data->pawr_ind_report.data_length,
-                                p_data->pawr_ind_report.rssi, p_data->periodic_adv_report.adv_data[0]);
+                printf("[%s] PAWR_RSP_REPORT_EVENT, len:%d, rssi:%i, content:%d...\r\n", __FUNCTION__, p_data->pawr_rsp_report.data_length,
+                                p_data->pawr_rsp_report.rssi, p_data->pawr_rsp_report.p_data[0]);
             }
             else
             {
-                printf("[%s] PAWR_IND_REPORT_EVENT, len:%d, rssi:%i\r\n", __FUNCTION__, p_data->pawr_ind_report.data_length,
-                                p_data->pawr_ind_report.rssi);
+                printf("[%s] PAWR_RSP_REPORT_EVENT, len:%d, rssi:%i\r\n", __FUNCTION__, p_data->pawr_rsp_report.data_length,
+                                p_data->pawr_rsp_report.rssi);
             }
             break;
 
         default:
             break;
     }
+}
+void app_bt_start_periodic_sync(void)
+{
+    wiced_bt_dev_status_t status;
+    memcpy(sync_par.adv_addr, peer_bda, BD_ADDR_LEN);
+    status = wiced_ble_padv_add_device_to_list(BLE_ADDR_PUBLIC, peer_bda,
+           APP_BT_PERIODIC_ADV_SET_ID);
+
+    if (WICED_SUCCESS != status)
+    {
+        printf("Error adding device to Periodic Advertiser list\n");
+        CY_ASSERT(0);
+    }
+
+    status = wiced_ble_padv_create_sync (&sync_par);
+    if (WICED_SUCCESS == status)
+    {
+        printf("[%s] wiced_ble_padv_create_sync Result: %d BDA: \n",
+            __FUNCTION__, status);
+    }
+    else
+    {
+        printf("[%s] wiced_ble_padv_create_sync Result: %d BDA: \n",
+            __FUNCTION__, status);
+        CY_ASSERT(0);
+    }
+
 }
 
 /**
@@ -140,49 +200,53 @@ static void periodic_sync_ext_adv_callback (wiced_bt_ble_adv_ext_event_t event, 
  */
 void app_bt_periodic_sync_start_cb(TimerHandle_t cb_params)
 {
-    wiced_bt_dev_status_t           status;
-    wiced_bt_ble_ext_scan_config_t  scan_cfg;
-    uint8_t periodic_adv_list = 0;
-    uint8_t filter_list_size = 0;
+    wiced_bt_dev_status_t status;
 
-    //WAR for btss may post PAWR event even though it didnt enable PAWR related at all
-    extern unsigned int btsnd_hcic_ble_set_evt_mask (uint8_t* event_mask);
-    btsnd_hcic_ble_set_evt_mask((uint8_t*)HCI_BLE_EVENT_MASK_DEF_NEW);
+    /* Set extended scan register callback */
+    status = wiced_ble_ext_scan_register_cb(ext_scan_result_cback);
+    if (WICED_SUCCESS != status)
+    {
+        printf("Error extended scan register callback\n");
+        CY_ASSERT(0);
+    }
 
-    wiced_bt_ble_observe (WICED_FALSE, 0, NULL);
+    /* Register for extended ADV events */
+    wiced_ble_ext_adv_register_cback(periodic_sync_ext_adv_callback);
 
-    // Register for extended ADV events
-    wiced_bt_ble_register_adv_ext_cback (periodic_sync_ext_adv_callback);
+    /* set extended scan parameters */
+    status = wiced_ble_ext_scan_set_params(&scan_params);
+    if (WICED_SUCCESS != status)
+    {
+        printf("Error setting extended scan parameters\n");
+        CY_ASSERT(0);
+    }
 
-    wiced_bt_ble_update_scanner_filter_list(1, peer_bda, BLE_ADDR_PUBLIC);
+    /* Disable extended scan */
+    status = wiced_ble_ext_scan_enable(0,&scan_enable);
+    if (WICED_SUCCESS != status)
+    {
+        printf("Error disabling extended scan\n");
+        CY_ASSERT(0);
+    }
 
-    scan_cfg.scanning_phys = WICED_BT_BLE_EXT_ADV_PHY_1M;
-    scan_cfg.duration      = 0;
-    scan_cfg.period        = 0;
-    // set extended scan parameters
-    status = wiced_bt_ble_cache_ext_scan_config(&scan_cfg);
-    printf("[%s] wiced_bt_ble_cache_ext_scan_config status: %d\r\n", __FUNCTION__, status);
+    /* Start periodic sync */
+    app_bt_start_periodic_sync();
 
-    filter_list_size = wiced_bt_ble_get_filter_accept_list_size();
-    printf("[%s] wiced_bt_ble_get_filter_accept_list_size list size: %d\r\n", __FUNCTION__, filter_list_size);
+    app_bt_util_print_bd_address(peer_bda);
 
-    periodic_adv_list = wiced_bt_ble_read_periodic_adv_list_size();
-    printf("[%s] wiced_bt_ble_read_periodic_adv_list_size list size: %d\r\n", __FUNCTION__, periodic_adv_list);
-
-    status = wiced_bt_ble_add_device_to_periodic_adv_list(BLE_ADDR_PUBLIC, peer_bda, APP_BT_PERIODIC_ADV_SET_ID);
-    printf("[%s] wiced_bt_ble_add_device_to_periodic_adv_list status: %d\r\n", __FUNCTION__, status);
-
-    status = wiced_bt_ble_create_sync_to_periodic_adv (WICED_BT_BLE_SYNC_TO_PERIODIC_ADV_LIST,
-                                                        APP_BT_PERIODIC_ADV_SET_ID, BLE_ADDR_PUBLIC, peer_bda, 0, APP_BT_PERIODIC_ADV_SYNC_TIMEOUT, 0);
-
-    printf("[%s] wiced_bt_ble_create_sync_to_periodic_adv BDA: %02x-%02x-%02x-%02x-%02x-%02x Result: %d\r\n", 
-            __FUNCTION__, peer_bda[0], peer_bda[1], peer_bda[2], peer_bda[3], peer_bda[4], peer_bda[5], status);
-
-    wiced_bt_ble_update_scanner_filter_policy(BTM_BLE_SCAN_POLICY_FILTER_ADV_RSP);
-    // set extended scan enable
-    status = wiced_bt_ble_scan (BTM_BLE_SCAN_TYPE_HIGH_DUTY, WICED_FALSE, periodic_sync_scan_result_cback);
-
-    printf("[%s] wiced_bt_ble_scan status: %d\r\n", __FUNCTION__, status);
+    /* set extended scan enable */
+    status = wiced_ble_ext_scan_enable(1,&scan_enable);
+    if (WICED_SUCCESS == status)
+    {
+        printf("[%s] wiced_ble_ext_scan_enable status:"
+            "%d\n", __FUNCTION__, status);
+    }
+    else
+    {
+        printf("[%s] wiced_ble_ext_scan_enable status:"
+            "%d\n", __FUNCTION__, status);
+        CY_ASSERT(0);
+    }
 }
 
 /**

@@ -295,6 +295,7 @@ Document title: *CE238425* – *AIROC&trade;: Bluetooth&reg; Low Energy Periodic
  1.0.0   | New code example
  1.1.0   | Added support for CYW989829M2EVB-01
  2.0.0   | Added support for CYW989829M2EVB-03, BSP and BTStack-integration major update for BT Firmware as a separate asset
+ 2.1.0   | Update Code example with BTSTACK 4.10.1
 
 All referenced product or service names and trademarks are the property of their respective owners.
 

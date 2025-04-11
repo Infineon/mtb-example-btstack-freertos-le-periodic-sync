@@ -38,7 +38,7 @@
  ******************************************************************************/
 const char* app_bt_util_get_btm_event_name(wiced_bt_management_evt_t event);
 
-const char* app_bt_util_get_ext_adv_event_name(wiced_bt_ble_adv_ext_event_t event);
+const char* app_bt_util_get_ext_adv_event_name(wiced_ble_ext_adv_event_t event);
 
 const char* app_bt_util_get_btm_advert_mode_name(wiced_bt_ble_advert_mode_t mode);
 
